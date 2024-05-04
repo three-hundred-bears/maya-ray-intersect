@@ -33,70 +33,36 @@
 #define kDirectionZFlagLong "-dirZ"
 
 
-MStatus rayIntersect::doIt( const MArgList& args){
+MStatus rayIntersect::doIt(const MArgList& args){
     MStatus status{MStatus::kFailure};
     setArgDataPtr(args);
-
+    // TODO: come up with better way to handle error display, displayError doesn't even work
     MSelectionList selList;
     MGlobal::getActiveSelectionList(selList);
     const MString errorMsg{"Invalid selection - select your ray origin, endpoint, and collision mesh, in that order"};
 
     // VALIDATE SELECTION
-    if (selList.length() < 3){
-        MGlobal::displayError(errorMsg);
-        return MS::kFailure;
-    }
+    if (!validateSelection(selList)){ return MS::kFailure; }
+
     MItSelectionList selListIter(selList);
     MDagPath dagPath;
     MFnMesh meshFn;
     MFnTransform originFn, dirFn;
+
     // GET ORIGIN
-    status = selListIter.getDagPath(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to retrieve dag path from first object"});
-        return status;
-    }
-    if (!dagPath.hasFn(MFn::kTransform)){
-        MGlobal::displayError(errorMsg);
-        return MS::kFailure;
-    }
-    status = originFn.setObject(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to set originFn object"});
-        return status;
-    }
+    if (!getCurrentDagPath(selListIter, dagPath)){ return MS::kFailure; }
+    if (!setFnObj(originFn, dagPath)){ return MS::kFailure; }
     selListIter.next();
+
     // GET DIR
-    status = selListIter.getDagPath(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to retrieve dag path from second object"});
-        return status;
-    }
-    if (!dagPath.hasFn(MFn::kTransform)){
-        MGlobal::displayError(errorMsg);
-        return MS::kFailure;
-    }
-    status = dirFn.setObject(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to set dirFn object"});
-        return status;
-    }
+    if (!getCurrentDagPath(selListIter, dagPath)){ return MS::kFailure; }
+    if (!setFnObj(dirFn, dagPath)){ return MS::kFailure; }
     selListIter.next();
+
     // GET MESH
-    status = selListIter.getDagPath(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to retrieve dag path from third object"});
-        return status;
-    }
-    if (!dagPath.extendToShape() || !dagPath.hasFn(MFn::kMesh)){
-        MGlobal::displayError(errorMsg);
-        return MS::kFailure;
-    }
-    status = meshFn.setObject(dagPath);
-    if (!status){
-        MGlobal::displayError(MString{"Failed to set meshFn object"});
-        return status;
-    }
+    if (!getCurrentDagPath(selListIter, dagPath)){ return MS::kFailure; }
+    if (!setFnObj(meshFn, dagPath)){ return MS::kFailure; }
+
     // FETCH ORIGIN/DIRECTION
     setOrigin(originFn.getTranslation(MSpace::kWorld));
     status = parseOriginArgs();
@@ -110,27 +76,86 @@ MStatus rayIntersect::doIt( const MArgList& args){
         MGlobal::displayError(MString{"Failed to parse args"});
         return status;
     }
+
     // DO RAY INTERSECT
-    MPointArray intersections{};
-    const bool doesIntersect{meshFn.intersect(
-        originFn.getTranslation(MSpace::kWorld),
-        MPoint{dirFn.getTranslation(MSpace::kWorld) - origin},
-        intersections,
-        kMFnMeshPointTolerance,
-        MSpace::kWorld
-    )};
-    MVector intersection{};
-    if (!doesIntersect) { intersection = MVector{0.0, 0.0, 0.0}; }
-    else { intersection = intersections[0]; }
+    MVector intersection{doIntersect(meshFn)};
+
     // CREATE RESULTING LOCATOR
+    createLocator(intersection);
+
+    return MS::kSuccess;
+}
+
+void createLocator(const MVector& intersection){
     MFnTransform xformFn;
     MObject xform{xformFn.create()};
     xformFn.setObject(xform);
     MString xformName{"intersection1"};
     xformFn.setName(xformName);
     xformFn.setTranslation(intersection, MSpace::kPreTransform);
+}
 
+MStatus getCurrentDagPath(
+    MItSelectionList& selListIter, 
+    MDagPath& dagPath)
+{
+    MStatus status {selListIter.getDagPath(dagPath)};
+    if (!status){
+        MGlobal::displayError(MString{"Failed to retrieve dag path from second object"});
+        return status;
+    }
     return MS::kSuccess;
+}
+
+MStatus setFnObj(MFnTransform& tranFn, const MDagPath& dagPath){
+    if (!dagPath.hasFn(MFn::kTransform)){
+        MGlobal::displayError(MString{"Invalid selection - select your ray origin, endpoint, and collision mesh, in that order"});
+        return MS::kFailure;
+    }
+    MStatus status{tranFn.setObject(dagPath)};
+    if (!status){
+        MGlobal::displayError(MString{"Failed to set function set object"});
+        return status;
+    }
+    return status;
+}
+
+MStatus setFnObj(MFnMesh& meshFn, MDagPath& dagPath){
+    if (!dagPath.extendToShape() || !dagPath.hasFn(MFn::kMesh)){
+        MGlobal::displayError(MString{"Invalid selection - select your ray origin, endpoint, and collision mesh, in that order"});
+        return MS::kFailure;
+    }
+    MStatus status{meshFn.setObject(dagPath)};
+    if (!status){
+        MGlobal::displayError(MString{"Failed to set function set object"});
+        return status;
+    }
+    return status;
+}
+
+MStatus validateSelection(const MSelectionList& selList){
+    // cout << "func length - " << selList.length() << endl;
+    size_t selLength{selList.length()};
+
+    if (selLength < 3){
+        MGlobal::displayError(MString{"Invalid selection - select your ray origin, endpoint, and collision mesh, in that order"});
+        return MS::kFailure;
+    }
+    return MS::kSuccess;
+}
+
+MVector rayIntersect::doIntersect(const MFnMesh& meshFn) const {
+    MPointArray intersections{};
+    const bool doesIntersect{meshFn.intersect(
+        origin,
+        dir,
+        intersections,
+        kMFnMeshPointTolerance,
+        MSpace::kWorld
+    )};
+    MVector intersection{};
+    if (!doesIntersect) { return MVector{0.0, 0.0, 0.0}; }
+    return intersections[0];
 }
 
 MStatus rayIntersect::parseOriginArgs(){
@@ -180,5 +205,5 @@ MSyntax rayIntersect::newSyntax(){
 }
 
 void* rayIntersect::creator(){
-    return (void *)(new rayIntersect);
+    return new rayIntersect;
 }

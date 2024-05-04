@@ -8,11 +8,9 @@ include($ENV{DEVKIT_LOCATION}/cmake/pluginEntry.cmake)
 include_directories("${CMAKE_SOURCE_DIR}")
 
 set(SOURCE_FILES 
-    rayIntersectFty.cpp 
     rayIntersectCmd.cpp 
     rayIntersectNode.cpp 
     rayIntersectMain.cpp 
-    rayIntersectFty.h 
     rayIntersectCmd.h 
     rayIntersectNode.h
 )

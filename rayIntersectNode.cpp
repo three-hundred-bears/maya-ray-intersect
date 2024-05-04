@@ -20,10 +20,10 @@ MObject rayIntersectNode::intersect;
 MObject rayIntersectNode::inputMesh;
 
 MStatus rayIntersectNode::compute(const MPlug& plug, MDataBlock& data){
-    MStatus status;
     MObject thisNode{plug.node()};
     MFnDependencyNode nodeFn{thisNode};
     if (plug == intersect){
+        MStatus status;
         // FETCH INPUT
         MDataHandle inputOrigin = data.inputValue(origin, &status);
         MDataHandle inputDirection = data.inputValue(dir, &status);
@@ -43,39 +43,9 @@ MStatus rayIntersectNode::compute(const MPlug& plug, MDataBlock& data){
         MObject meshVal = inMesh.asMesh();  // asMeshTransformed simply does not work
         // GET DAG PATH
         MDagPath dagPath;
-        MPlug inMeshPlug{nodeFn.findPlug(inputMesh, true, &status)};
-        if (!status){
-            MGlobal::displayError(MString{"Failed to find inputMesh plug"});
-            return status;
-        }
-        MPlugArray inputs;
-        inMeshPlug.connectedTo(inputs, true, false, &status);
-        if (!status){
-            MGlobal::displayError(MString{"Failed to retrieve node connections"});
-        }
-        if (inputs.length() == 0)
-            return MS::kFailure;
-        MPlug parentPlug{inputs[0]};
-        MObject parentNode{parentPlug.node()};
-        MFnDagNode dagNodeFn{parentNode};
-        status = dagNodeFn.getPath(dagPath);
-        if (!status){
-            MGlobal::displayError(MString{"Failed to retrieve dag path from object"});
-            return status;
-        }
+        if (!getMeshDagPath(dagPath, nodeFn)){ return MS::kFailure; }
         // DO RAY INTERSECT
-        MFnMesh meshFn{dagPath};
-        MPointArray intersections{};
-        const bool doesIntersect{meshFn.intersect(
-            originVal,
-            MPoint{dirVal - originVal},
-            intersections,
-            kMFnMeshPointTolerance,
-            MSpace::kWorld
-        )};
-        MVector intersection{};
-        if (!doesIntersect) { intersection = MVector{0.0, 0.0, 0.0}; }
-        else { intersection = intersections[0]; }
+        MVector intersection{doIntersect(dagPath, originVal, dirVal)};
         // SET INTERSECTION
         outputIntersection.set(intersection);
         status = data.setClean(plug);
@@ -89,6 +59,35 @@ MStatus rayIntersectNode::compute(const MPlug& plug, MDataBlock& data){
 
 void* rayIntersectNode::creator(){
     return new rayIntersectNode();
+}
+
+MStatus rayIntersectNode::getMeshDagPath(
+    MDagPath& dagPath, 
+    MFnDependencyNode& nodeFn) 
+const {
+    MStatus status;
+
+    MPlug inMeshPlug{nodeFn.findPlug(inputMesh, true, &status)};
+    if (!status){
+        MGlobal::displayError(MString{"Failed to find inputMesh plug"});
+        return status;
+    }
+    MPlugArray inputs;
+    inMeshPlug.connectedTo(inputs, true, false, &status);
+    if (!status){
+        MGlobal::displayError(MString{"Failed to retrieve node connections"});
+        return status;
+    }
+    if (inputs.length() == 0)
+        return MS::kFailure;
+    MPlug parentPlug{inputs[0]};
+    MObject parentNode{parentPlug.node()};
+    MFnDagNode dagNodeFn{parentNode};
+    status = dagNodeFn.getPath(dagPath);
+    if (!status){
+        MGlobal::displayError(MString{"Failed to retrieve dag path from object"});
+    }
+    return status;
 }
 
 MStatus rayIntersectNode::initialize(){
@@ -144,4 +143,19 @@ MStatus rayIntersectNode::initialize(){
     if (!status){status.perror("attributeAffects"); return status;}
 
     return status; // MS::kSuccess;
+}
+
+MVector doIntersect(const MDagPath& dagPath, const MVector& originVal, const MPoint& dirVal){
+    MFnMesh meshFn{dagPath};
+    MPointArray intersections{};
+    const bool doesIntersect{meshFn.intersect(
+        originVal,
+        MPoint{dirVal - originVal},
+        intersections,
+        kMFnMeshPointTolerance,
+        MSpace::kWorld
+    )};
+    MVector intersection{};
+    if (!doesIntersect) { return MVector{0.0, 0.0, 0.0}; }
+    return intersections[0];
 }
